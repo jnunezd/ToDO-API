@@ -1,43 +1,75 @@
-"""
-This module takes care of starting the API Server, Loading the DB and Adding the endpoints
-"""
 import os
-from flask import Flask, request, jsonify, url_for
-from flask_migrate import Migrate
-from flask_swagger import swagger
-from flask_cors import CORS
-from utils import APIException, generate_sitemap
-from models import db
-#from models import Person
+from flask import Flask, request, jsonify, render_template
+from flask_script import Manager
+from flask_migrate import Migrate, MigrateCommand
+from models import db, Todo
+
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__)
-app.url_map.strict_slashes = False
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DB_CONNECTION_STRING')
+app.config['DEBUG'] = True
+app.config['ENV'] = 'development'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+ os.path.join(BASE_DIR, 'database.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-MIGRATE = Migrate(app, db)
+
 db.init_app(app)
-CORS(app)
 
-# Handle/serialize errors like a JSON object
-@app.errorhandler(APIException)
-def handle_invalid_usage(error):
-    return jsonify(error.to_dict()), error.status_code
+Migrate(app, db)
 
-# generate sitemap with all your endpoints
+manager = Manager(app)
+manager.add_command("db", MigrateCommand)
+
+
 @app.route('/')
-def sitemap():
-    return generate_sitemap(app)
+def home():
+    return render_template("index.html")
 
-@app.route('/hello', methods=['POST', 'GET'])
-def handle_hello():
 
-    response_body = {
-        "hello": "world"
-    }
+@app.route('/Todos',methods=['GET','POST'])
+@app.route('/Todo/<int:id>', methods=['GET','DELETE'])
+def todos(id=None):
 
-    return jsonify(response_body), 200
+    if request.method == 'GET':
 
-# this only runs if `$ python src/main.py` is executed
-if __name__ == '__main__':
-    PORT = int(os.environ.get('PORT', 3000))
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+        if id is not None:
+            todo = Todo.query.get(id)
+            if todo:
+                return jsonify(todo.serialize()), 200
+            else:
+                return jsonify({"msg": "Todo not found"}), 404
+        else:
+            todos = Todo.query.all()
+            todos = list(map(lambda todo: todo.serialize(), todos))
+            return jsonify(todos), 200
+        
+
+    if request.method == 'POST':
+        todo = request.json.get('todo', None)
+        
+
+        if not todo:
+            return jsonify({"msg": 'Name is required'}), 400
+        
+        todo = Todo()
+        todo.todo = todo
+
+        db.session.add(todo)
+        db.session.commit()
+
+        return jsonify(todo.serialize()), 201
+
+
+
+    if request.method == 'DELETE':
+        todo = Todo.query.get(id)
+
+        if not todo:
+            return jsonify({"msg": "Todo not found"}), 404
+
+        db.session.delete(todo)
+        db.session.commit()
+        return jsonify({"msg": "Todo deleted"}), 200
+
+if __name__ == "__main__":
+    manager.run()
